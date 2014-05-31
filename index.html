@@ -1,56 +1,93 @@
 <!DOCTYPE html>
 <html>
-
   <head>
-    <meta charset='utf-8' />
-    <meta http-equiv="X-UA-Compatible" content="chrome=1" />
-    <meta name="description" content="Mongorm : Mongo based ORM" />
-
-    <link rel="stylesheet" type="text/css" media="screen" href="stylesheets/stylesheet.css">
-
-    <title>Mongorm</title>
+    <meta charset='utf-8'>
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <link href='https://fonts.googleapis.com/css?family=Chivo:900' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" type="text/css" href="stylesheets/stylesheet.css" media="screen" />
+    <link rel="stylesheet" type="text/css" href="stylesheets/pygment_trac.css" media="screen" />
+    <link rel="stylesheet" type="text/css" href="stylesheets/print.css" media="print" />
+    <!--[if lt IE 9]>
+    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <title>Mongorm by Simversity</title>
   </head>
 
   <body>
+    <div id="container">
+      <div class="inner">
 
-    <!-- HEADER -->
-    <div id="header_wrap" class="outer">
-        <header class="inner">
-          <a id="forkme_banner" href="https://github.com/Simversity/mongorm">View on GitHub</a>
-
-          <h1 id="project_title">Mongorm</h1>
-          <h2 id="project_tagline">Mongo based ORM</h2>
-
-            <section id="downloads">
-              <a class="zip_download_link" href="https://github.com/Simversity/mongorm/zipball/master">Download this project as a .zip file</a>
-              <a class="tar_download_link" href="https://github.com/Simversity/mongorm/tarball/master">Download this project as a tar.gz file</a>
-            </section>
+        <header>
+          <h1>Mongorm</h1>
+          <h2>Mongo based ORM</h2>
         </header>
-    </div>
 
-    <!-- MAIN CONTENT -->
-    <div id="main_content_wrap" class="outer">
-      <section id="main_content" class="inner">
-        <h4>
-<a name="introduction" class="anchor" href="#introduction"><span class="octicon octicon-link"></span></a>Introduction</h4>
+        <section id="downloads" class="clearfix">
+          <a href="https://github.com/Simversity/mongorm/zipball/master" id="download-zip" class="button"><span>Download .zip</span></a>
+          <a href="https://github.com/Simversity/mongorm/tarball/master" id="download-tar-gz" class="button"><span>Download .tar.gz</span></a>
+          <a href="https://github.com/Simversity/mongorm" id="view-on-github" class="button"><span>View on GitHub</span></a>
+        </section>
 
-<p>NoSQL databases like MongoDB are a hot tool these days. The ease of usage and the speed of development make them the right choice of tool for most of application use cases. The fact that you can dump any JSON (read BSON) data to databases is the real advantage over tight physical schemas. But the lack of data integrity and validations could mean that all the validations and datatype checks have to re-implemented at the application layer.</p>
+        <hr>
+
+        <section id="main_content">
+          <p>NoSQL databases like MongoDB are a hot tool these days. The ease of usage and the speed of development make them the right choice of tool for most of application use cases. The fact that you can dump any JSON (read BSON) data to databases is the real advantage over tight physical schemas. But the lack of data integrity and validations could mean that all the validations and datatype checks have to re-implemented at the application layer.</p>
 
 <p>Mongorm is a lightweight ORM available to perform basic data type checks and constraint validations. It can be imported to create a base class used to define models that represent a collection in the database. ORM also provides a bunch of default datatypes that can be used alongside any custom datatypes that you may want to provde.</p>
 
-<p>Working on this... hold tight.</p>
-      </section>
+<p>In a regular use case you would create a new collection and store stuff as:</p>
+
+<div class="highlight highlight-python"><pre><span class="n">collection</span> <span class="o">=</span> <span class="n">pymongo</span><span class="o">.</span><span class="n">MongoClient</span><span class="p">()</span><span class="o">.</span><span class="n">sample_database</span><span class="o">.</span><span class="n">sample_coll</span>
+</pre></div>
+
+<p>A regular update operation would look like</p>
+
+<div class="highlight highlight-python"><pre><span class="n">collection</span><span class="o">.</span><span class="n">insert</span><span class="p">({</span><span class="s">"data"</span><span class="p">:</span> <span class="s">"hello"</span><span class="p">,</span> <span class="s">"data_list"</span><span class="p">:</span> <span class="p">[</span><span class="mi">1</span><span class="p">]})</span>
+<span class="n">collection</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s">"data"</span><span class="p">:</span> <span class="s">"hello"</span><span class="p">},</span> <span class="p">{</span><span class="s">"$set"</span><span class="p">:</span> <span class="p">{</span><span class="s">"data_set"</span><span class="p">:</span> <span class="mi">2</span><span class="p">}})</span>
+</pre></div>
+
+<p>If you notice, the data type of data_list has changed from a list to a string withour any errors.
+Ideally you would like an error to be raised but pyMongo would not do that. Mongorm solves this for you.</p>
+
+<p>A quick re-implementation of the above requirement will looks like this.</p>
+
+<pre><code>from mongorm.base import ModelBase
+from mongorm.datatypes import Unichar, List
+
+class SampleModel(ModelBase):
+    __tablename__ = "sample_coll"
+
+    data = Unichar(nullable=False)
+    data_list = List(default=[], nullable=False)
+
+    @classmethod
+    def using(cls):
+        return pymongo.MongoClient().sample_database
+
+sm = SampleModel.insert({"data_list": [1]})
+Raises Error: mongorm.base.ORMException: ['data is a required field']
+
+OR
+
+SampleModel.update({"data": "hello"}, {"$set": {"data_list": 2}})
+Raises Error: mongorm.base.ORMException: ["Field: datalist, Error: Expected &lt;type 'list'&gt;. Found 2"]
+
+OR 
+
+SampleModel.insert({"data": 1, "data_list": 2}})
+mongorm.base.ORMException: ['Field: data_list, Error: Expected a List but found 12', 'Field: data, Error: A field in this form requires a text string but you entered this instead: 1']
+</code></pre>
+
+<p>How wonderful !!</p>
+        </section>
+
+        <footer>
+          Mongorm is maintained by <a href="https://github.com/Simversity">Simversity</a><br>
+          This page was generated by <a href="http://pages.github.com">GitHub Pages</a>. Tactile theme by <a href="https://twitter.com/jasonlong">Jason Long</a>.
+        </footer>
+
+        
+      </div>
     </div>
-
-    <!-- FOOTER  -->
-    <div id="footer_wrap" class="outer">
-      <footer class="inner">
-        <p class="copyright">Mongorm maintained by <a href="https://github.com/Simversity">Simversity</a></p>
-        <p>Published with <a href="http://pages.github.com">GitHub Pages</a></p>
-      </footer>
-    </div>
-
-    
-
   </body>
 </html>
