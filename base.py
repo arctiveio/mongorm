@@ -2,124 +2,17 @@ import re
 import pymongo
 import datetime
 
-from types import ClassType
-from .datatypes import ObjectId, ID, DataType, List, Dict, Boolean, Unichar
-
-OnModelInit = None
-
-
-class ORMException(Exception):
-    pass
+from .errors import ORMException
+from .meta import ModelMeta, DbDictClass, ModelDefinition
+from .datatypes import ObjectId, ID, Boolean, DataType, List, Dict
 
 
-def pack(_val):
-    if isinstance(_val, DbDictClass):
-        return _val
-    if isinstance(_val, dict):
-        return DbDictClass(_val)
-    elif hasattr(_val, '__iter__'):
-        return [pack(v) for v in _val]
-    return _val
-
-class_name = lambda cls: cls.__name__ if isinstance(
-    cls, ClassType) else cls.__class__.__name__
-
-
-class DbDictClass(dict):
-
-    def __getattribute__(self, key):
-        try:
-            return self[key]
-        except KeyError:
-            pass
-        return super(DbDictClass, self).__getattribute__(key)
-
-    def __setattr__(self, key, value):
-        self[key] = pack(value)
-
-    def __delattr__(self, key):
-        self.pop(key)
-
-    def copy(self, dbdict=False):
-        if dbdict:
-            print "DbDict copy is expensive."
-
-        def _format(t, dbdict=False):
-            if isinstance(t, (DbDictClass, dict)):
-                _obj = {} if not dbdict else DbDictClass({})
-                for k, v in t.iteritems():
-                    _obj[k] = _format(v, dbdict=dbdict)
-                return _obj
-            elif isinstance(t, list):
-                return [_format(x, dbdict=dbdict) for x in t]
-            return t
-
-        return _format(self, dbdict=dbdict)
-
-
-class ModelMeta(type):
-
-    def get_field_defaults(cls, field):
-        return cls.defaults.get(field)
-
-    def get_field_choices(cls, field):
-        return cls.choices.get(field)
-
-    def attach_fields(cls, model):
-        for (field_name, obj) in vars(model).items():
-            if not isinstance(obj, DataType):
-                continue
-            cls.fields[field_name] = obj
-            if getattr(obj, 'default', None) is not None:
-                cls.defaults.update({field_name: obj.default})
-            if getattr(obj, 'choices', None) is not None:
-                cls.choices.update({field_name: obj.choices})
-            if obj.nullable is False:
-                cls.required_fields.add(field_name)
-            if obj.searchable is True:
-                cls.searchable_fields.append(field_name)
-
-        cls.searchable_fields = list(cls.searchable_fields)
-
-    def __init__(cls, name, base, attrs):
-        if attrs.get('__dyn__') or attrs.get('__baseclass__'):
-            return
-
-        tablename = getattr(cls, '__tablename__', name).lower()
-        cls.__tablename__ = tablename
-
-        cls.fields = {
-            '_id': ID(nullable=False),
-            'deleted': Boolean(default=False)
-        }
-
-        cls.defaults = {}
-        cls.choices = {}
-        cls.required_fields = set()
-        cls.searchable_fields = []
-
-        if callable(OnModelInit):
-            OnModelInit(cls, name, attrs)
-
-        for model in base:
-            if issubclass(model, ModelBase):
-                if "__baseclass__" in model.__dict__:
-                    continue
-
-                cls.fields.update(model.fields)
-                cls.defaults.update(model.defaults)
-                cls.required_fields.update(model.required_fields)
-                cls.searchable_fields.extend(model.searchable_fields)
-
-            else:
-                cls.attach_fields(model)
-
-        cls.attach_fields(cls)
-
-
-class ModelBase(DbDictClass):
+class ModelBase(ModelDefinition):
     __baseclass__ = True
     __metaclass__ = ModelMeta
+
+    _id = ID(nullable=False)
+    deleted = Boolean(default=False)
 
     @classmethod
     def valid_database(cls):
@@ -170,7 +63,7 @@ class ModelBase(DbDictClass):
            (key in self.fields) and \
            (key not in self.keys()):
             raise AttributeError(
-                "%s object has no attribute %s" % (class_name(self), key))
+                "%s object has no attribute %s" % (self, key))
 
         return super(ModelBase, self).__getattribute__(key)
 

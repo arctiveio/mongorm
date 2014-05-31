@@ -1,14 +1,8 @@
 import re
 import datetime
 from bson.objectid import ObjectId
-
-
-class DataTypeMismatch(Exception):
-
-    def __init__(self, message, *args, **kwargs):
-        self.error_message = message
-        super(DataTypeMismatch, self).__init__(message, *args, **kwargs)
-
+from .meta import DataTypeDefinition
+from .errors import DataTypeMismatch
 
 def check_defaults(func):
     def inner(self, value):
@@ -27,7 +21,7 @@ def check_defaults(func):
     return inner
 
 
-class DataType(object):
+class DataType(DataTypeDefinition):
     datatype = None
     default = None
     nullable = True
