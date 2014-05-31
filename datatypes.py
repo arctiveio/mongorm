@@ -86,7 +86,7 @@ class Regex(Unichar):
             return value
         raise DataTypeMismatch("Invalid value %s" % value)
 
-id_re = re.compile('^\d{24}$')
+id_re = re.compile('^\d{19}\w{5}$')
 url_re = re.compile(
     r'^file:///|https?://'  # http:// or https://
     # domain...

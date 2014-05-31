@@ -225,7 +225,7 @@ class ModelBase(DbDictClass):
                         getattr(e, "error_message", None) or \
                         "Expected %s. Found %s" % (typeobj.datatype, value)
 
-                    errors.append("Field: %s Error: %s" % (key, error))
+                    errors.append("Field: %s, Error: %s" % (key, error))
 
         if errors:
             raise ORMException(errors)
