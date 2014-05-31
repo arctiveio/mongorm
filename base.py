@@ -456,8 +456,34 @@ class ModelBase(DbDictClass):
         if kwargs.get("upsert"):
             raise ORMException(
                 '''
-                Upsert is blocked.
-                Refer to https://github.com/Simversity/blackjack/issues/1051
+                An upsert with empty second argument, erases entire document.
+                To avoid any accidental update, drop upsert support.
+
+                Proof of the Problem:
+
+                Mongo-IN [95]>
+
+                con.test.test.insert({"x": 1}),
+                con.test.test.find_one()
+
+                Mongo-Out [95]:
+
+                (ObjectId('52134596785c1e073a04692b'),
+                {u'_id': ObjectId('52134596785c1e073a04692b'), u'x': 1})
+
+                Mongo-IN [96]>
+
+                con.test.test.update({"x":1}, {}, upsert=True),
+                con.test.test.find_one()
+
+                Mongo-Out [96]:
+
+                ({u'connectionId': 1,
+                u'err': None,
+                u'n': 1,
+                u'ok': 1.0,
+                u'updatedExisting': True},
+                {u'_id': ObjectId('52134596785c1e073a04692b')})
                 ''')
 
         call, _f, _d, _k = cls.__update(*args, **kwargs)
