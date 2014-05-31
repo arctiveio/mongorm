@@ -1,23 +1,16 @@
 import re
 import pymongo
+import datetime
+
 from types import ClassType
+from datatypes import ObjectId, ID, DataType, List, Dict, Boolean, Unichar
 
+OnModelInit = None
 
-from .datatypes import DataType, List, Dict, Boolean, Unichar
-from ..timezone import epoch_now, TZ
-from ..school import generate_oid_string, flatten, generate_resource_id
 
 class ORMException(Exception):
     pass
 
-tables = {}
-RESOURCE_MAP = {}
-
-def get_model_from_id(ident):
-    ret = RESOURCE_MAP.get(str(ident)[-5:])
-    if not ret:
-        raise ORMException("No Model match for ObjectID: %s" % ident)
-    return tables.get(ret)
 
 def pack(_val):
     if isinstance(_val, DbDictClass):
@@ -28,8 +21,12 @@ def pack(_val):
         return [pack(v) for v in _val]
     return _val
 
+class_name = lambda cls: cls.__name__ if isinstance(
+    cls, ClassType) else cls.__class__.__name__
+
 
 class DbDictClass(dict):
+
     def __getattribute__(self, key):
         try:
             return self[key]
@@ -61,6 +58,7 @@ class DbDictClass(dict):
 
 
 class ModelMeta(type):
+
     def get_field_defaults(cls, field):
         return cls.defaults.get(field)
 
@@ -91,7 +89,7 @@ class ModelMeta(type):
         cls.__tablename__ = tablename
 
         cls.fields = {
-            '_id': Unichar(nullable=False),
+            '_id': ID(nullable=False),
             'deleted': Boolean(default=False)
         }
 
@@ -100,25 +98,8 @@ class ModelMeta(type):
         cls.required_fields = set()
         cls.searchable_fields = []
 
-        if not getattr(cls, '__rid__', None):
-            print "Generating missing __rid__ for [%s]" % name
-            attrs['__rid__'] = generate_resource_id(cls.__tablename__)
-
-        if '__rid__' in attrs:
-            resource_id = attrs.get('__rid__')
-            if len(resource_id) != 5:
-                raise Exception("ID %s len != 5 generated for table %s" %
-                                (resource_id, tablename))
-
-            if resource_id in RESOURCE_MAP and name != RESOURCE_MAP[resource_id]:
-                raise Exception("Conficting resources id for %s and %s " %
-                                (cls, RESOURCE_MAP[resource_id]))
-
-            cls.resource_id = resource_id
-            RESOURCE_MAP[resource_id] = name
-
-            if not tables.get(tablename):
-                tables[name] = cls
+        if callable(OnModelInit):
+            OnModelInit(cls)
 
         for model in base:
             if issubclass(model, ModelBase):
@@ -135,8 +116,6 @@ class ModelMeta(type):
 
         cls.attach_fields(cls)
 
-class_name = lambda cls: cls.__name__ if isinstance(
-    cls, ClassType) else cls.__class__.__name__
 
 class ModelBase(DbDictClass):
     __baseclass__ = True
@@ -177,7 +156,7 @@ class ModelBase(DbDictClass):
         if args or not isinstance(partial_model, bool):
             raise AttributeError("args not supported. Use kwargs instead.")
 
-        #NOTE: Delegating update to dict's update method.
+        # NOTE: Delegating update to dict's update method.
         self.__dict__['update'] = super(ModelBase, self).update
         if partial_model:
             super(ModelBase, self).__init__(kwargs)
@@ -194,6 +173,14 @@ class ModelBase(DbDictClass):
                 "%s object has no attribute %s" % (class_name(self), key))
 
         return super(ModelBase, self).__getattribute__(key)
+
+    @classmethod
+    def now(cls):
+        return datetime.datetime.utcnow()
+
+    @classmethod
+    def generate_id(cls):
+        return ObjectId()
 
     @classmethod
     def mongo_collection(cls, database):
@@ -235,8 +222,8 @@ class ModelBase(DbDictClass):
                     data_dict[key] = typeobj.dbfy(value)
                 except Exception, e:
                     error = getattr(e, "log_message", None) or \
-                            getattr(e, "error_message", None) or \
-                            "Expected %s. Found %s" % (typeobj.datatype, value)
+                        getattr(e, "error_message", None) or \
+                        "Expected %s. Found %s" % (typeobj.datatype, value)
 
                     errors.append("Field: %s Error: %s" % (key, error))
 
@@ -254,9 +241,9 @@ class ModelBase(DbDictClass):
         validated_docs = []
 
         for d in documents:
-            d['_id'] = generate_oid_string(resource_id=cls.resource_id)
-            d['created_on'] = epoch_now()
-            d['modified_on'] = epoch_now()
+            d['_id'] = cls.generate_id()
+            d['created_on'] = cls.now()
+            d['modified_on'] = cls.now()
 
             cls.prepare_insert_document(d)
 
@@ -327,14 +314,14 @@ class ModelBase(DbDictClass):
 
         database = self.valid_database()
 
-        self.modified_on = epoch_now()
+        self.modified_on = self.now()
         existing_id = self.get('_id')
 
         self.prepare_save_document()
 
         if not existing_id or isinstance(existing_id, DataType):
-            self.created_on = epoch_now()
-            self._id = generate_oid_string(resource_id=self.resource_id)
+            self.created_on = self.now()
+            self._id = self.generate_id()
 
         if validate:
             self.validate_type(self)
@@ -352,7 +339,8 @@ class ModelBase(DbDictClass):
         try:
             call.save(self)
         except pymongo.errors.DuplicateKeyError, e:
-            pattern = re.compile(r'.+\s+(?P<db_name>\w+)\.(?P<table_name>\w+)\.\$(?P<field_name>\w+)_\d+.*\"(?P<value>.*)\".*}.*')
+            pattern = re.compile(
+                r'.+\s+(?P<db_name>\w+)\.(?P<table_name>\w+)\.\$(?P<field_name>\w+)_\d+.*\"(?P<value>.*)\".*}.*')
             errors = pattern.findall(e.args[0])
             if errors:
                 error_list = map(lambda i: "%s already exists for value %s" %
@@ -406,10 +394,10 @@ class ModelBase(DbDictClass):
                         continue
 
                     if (
-                        len(field_split) == 1 and \
+                        len(field_split) == 1 and
                         not isinstance(datatype, List)
                     ) or (
-                        len(field_split) > 1 and \
+                        len(field_split) > 1 and
                         not isinstance(datatype, Dict)
                     ):
                         errors.append("%s should be of type %s. Found %s"
@@ -427,9 +415,9 @@ class ModelBase(DbDictClass):
             document["$set"] = {}
 
         if silent is False:
-            document['$set']['modified_on'] = epoch_now()
+            document['$set']['modified_on'] = cls.now()
 
-        document["$set"]["updated_on"] = epoch_now()
+        document["$set"]["updated_on"] = cls.now()
 
         cls.prepare_update_document(document)
         cls.prepare_update_query(filter_args)
@@ -517,7 +505,6 @@ class ModelBase(DbDictClass):
                          as_class=DbDictClass,
                          manipulate=False)
 
-
     @classmethod
     def count(cls, *args, **kwargs):
         kwargs["fields"] = ["_id"]
@@ -570,7 +557,7 @@ class ModelBase(DbDictClass):
 
         delete_doc = {
             'deleted': True,
-            "deleted_on": epoch_now()
+            "deleted_on": cls.now()
         }
 
         cls.prepare_delete_document(delete_doc)

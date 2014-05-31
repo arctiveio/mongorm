@@ -1,7 +1,10 @@
 import re
 import datetime
+from bson.objectid import ObjectId
+
 
 class DataTypeMismatch(Exception):
+
     def __init__(self, message, *args, **kwargs):
         self.error_message = message
         super(DataTypeMismatch, self).__init__(message, *args, **kwargs)
@@ -22,6 +25,7 @@ def check_defaults(func):
 
         return func(self, value)
     return inner
+
 
 class DataType(object):
     datatype = None
@@ -55,14 +59,11 @@ class Unichar(DataType):
                 "A field in this form requires a text "
                 "string but you entered this instead: %s" % value)
 
-        #elif value and not value.strip():
-        #    raise DataTypeMismatch(
-        #        "You have left a required field in this form empty.")
-
         return super(Unichar, cls).dbfy(value)
 
 
 class Regex(Unichar):
+
     def __init__(cls, regex, **kwargs):
         if not regex:
             raise DataTypeMismatch(
@@ -88,7 +89,8 @@ class Regex(Unichar):
 id_re = re.compile('^\d{24}$')
 url_re = re.compile(
     r'^file:///|https?://'  # http:// or https://
-    r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # domain...
+    # domain...
+    r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'
     r'localhost|'  # localhost...
     r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
     r'(?::\d+)?'  # optional port
@@ -99,11 +101,19 @@ epoch_re = re.compile(r'^\d{13}$')
 
 
 class ID(Regex):
+
     def __init__(cls, **kwargs):
         Regex.__init__(cls, id_re, **kwargs)
 
+    @check_defaults
+    def dbfy(self, value):
+        if isinstance(value, ObjectId):
+            return value
+        return super(ID, self).dbfy(value)
+
 
 class Email(Regex):
+
     def __init__(cls, **kwargs):
         Regex.__init__(cls, email_re, **kwargs)
 
@@ -113,6 +123,7 @@ class Email(Regex):
 
 
 class URL(Regex):
+
     def __init__(cls, **kwargs):
         Regex.__init__(cls, url_re, **kwargs)
 
@@ -124,9 +135,11 @@ class URL(Regex):
         try:
             val = Regex.dbfy(cls, value)
         except DataTypeMismatch, e:
-            raise DataTypeMismatch("%s does not match a valid URL scheme" % value)
+            raise DataTypeMismatch(
+                "%s does not match a valid URL scheme" % value)
         else:
             return val
+
 
 class Boolean(DataType):
     datatype = bool
@@ -176,6 +189,7 @@ class Datemonth(Integer):
 class Dateyear(Integer):
     default = 2010
 
+
 class Timehour(Integer):
     default = 0
     valid = lambda self, x: x < 24 and x >= 0
@@ -184,8 +198,10 @@ class Timehour(Integer):
     def dbfy(cls, value):
         value = Integer.dbfy(cls, value)
         if not cls.valid(value):
-            raise DataTypeMismatch('%s is not a valid Hour format. [0-23 in 24 hours format]')
+            raise DataTypeMismatch(
+                '%s is not a valid Hour format. [0-23 in 24 hours format]')
         return value
+
 
 class Timeminutes(Integer):
     default = 0
@@ -195,7 +211,8 @@ class Timeminutes(Integer):
     def dbfy(cls, value):
         value = Integer.dbfy(cls, value)
         if not cls.valid(value):
-            raise DataTypeMismatch('%s is not a valid Minute number format. [0-59]')
+            raise DataTypeMismatch(
+                '%s is not a valid Minute number format. [0-59]')
         return value
 
 
@@ -211,6 +228,7 @@ class Decimal(DataType):
     def dbfy(cls, value):
         return float(value)
 
+
 class Currency(Decimal):
     datatype = float
     nullable = False
@@ -222,6 +240,7 @@ class Currency(Decimal):
         if value < 0:
             raise Excpetion("Currency cannot be a negative value")
         return value
+
 
 class Html(Unichar):
     pass
@@ -251,10 +270,13 @@ class Datetime(DataType):
     @check_defaults
     def dbfy(cls, value):
         if not isinstance(value, cls.datatype):
-            raise DataTypeMismatch("Expected datetime. Found %s instead" % value)
+            raise DataTypeMismatch(
+                "Expected datetime. Found %s instead" % value)
         return value
 
+
 class Timestamp(Regex):
+
     def __init__(cls, **kwargs):
         Regex.__init__(cls, epoch_re, **kwargs)
 
