@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <title>Mongorm by Simversity</title>
+    <link rel="stylesheet" href="stylesheets/styles.css">
+    <link rel="stylesheet" href="stylesheets/pygment_trac.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
+    <script src="javascripts/respond.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <!--[if lt IE 8]>
+    <link rel="stylesheet" href="stylesheets/ie.css">
+    <![endif]-->
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+
+  </head>
+  <body>
+      <div id="header">
+        <nav>
+          <li class="fork"><a href="https://github.com/Simversity/mongorm">View On GitHub</a></li>
+          <li class="downloads"><a href="https://github.com/Simversity/mongorm/zipball/master">ZIP</a></li>
+          <li class="downloads"><a href="https://github.com/Simversity/mongorm/tarball/master">TAR</a></li>
+          <li class="title">DOWNLOADS</li>
+        </nav>
+      </div><!-- end header -->
+
+    <div class="wrapper">
+
+      <section>
+        <div id="title">
+          <h1>Mongorm</h1>
+          <p>Mongo based ORM</p>
+          <hr>
+          <span class="credits left">Project maintained by <a href="https://github.com/Simversity">Simversity</a></span>
+          <span class="credits right">Hosted on GitHub Pages &mdash; Theme by <a href="https://twitter.com/michigangraham">mattgraham</a></span>
+        </div>
+
+        <h4>
+<a name="introduction" class="anchor" href="#introduction"><span class="octicon octicon-link"></span></a>Introduction</h4>
+
+<p>NoSQL databases like MongoDB are a hot tool these days. The ease of usage and the speed of development make them the right choice of tool for most of application use cases. The fact that you can dump any JSON (read BSON) data to databases is the real advantage over tight physical schemas. But the lack of data integrity and validations could mean that all the validations and datatype checks have to re-implemented at the application layer.</p>
+
+<p>Mongorm is a lightweight ORM available to perform basic data type checks and constraint validations. It can be imported to create a base class used to define models that represent a collection in the database. ORM also provides a bunch of default datatypes that can be used alongside any custom datatypes that you may want to provde.</p>
+
+<p>In a regular use case you would create a new collection and store stuff as:</p>
+
+<div class="highlight highlight-python"><pre><span class="n">collection</span> <span class="o">=</span> <span class="n">pymongo</span><span class="o">.</span><span class="n">MongoClient</span><span class="p">()</span><span class="o">.</span><span class="n">sample_database</span><span class="o">.</span><span class="n">sample_coll</span>
+</pre></div>
+
+<p>If you have already read the party document, you would be using dbapi instead of the MongoClient approach. Something like:</p>
+
+<div class="highlight highlight-python"><pre><span class="n">collection</span> <span class="o">=</span> <span class="n">dbapi</span><span class="p">(</span><span class="n">dbapi</span><span class="o">.</span><span class="n">sample_database</span><span class="p">,</span> <span class="s">"sample_coll"</span><span class="p">)</span>
+</pre></div>
+
+<p>A regular update operation would look like</p>
+
+<div class="highlight highlight-python"><pre><span class="n">collection</span><span class="o">.</span><span class="n">insert</span><span class="p">({</span><span class="s">"data"</span><span class="p">:</span> <span class="s">"hello"</span><span class="p">,</span> <span class="s">"data_list"</span><span class="p">:</span> <span class="p">[</span><span class="mi">1</span><span class="p">]})</span>
+<span class="n">collection</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s">"data"</span><span class="p">:</span> <span class="s">"hello"</span><span class="p">},</span> <span class="p">{</span><span class="s">"$set"</span><span class="p">:</span> <span class="p">{</span><span class="s">"data_set"</span><span class="p">:</span> <span class="mi">2</span><span class="p">}})</span>
+</pre></div>
+
+<p>If you notice, the data type of data_list has changed from a list to a string withour any errors.
+Ideally you would like an error to be raised but pyMongo would not do that. Simtools' ORM solves this for you.</p>
+
+<p>A quick re-implementation of the above requirement will looks like this.</p>
+
+<div class="highlight highlight-python"><pre><span class="kn">from</span> <span class="nn">simtools.orm.base</span> <span class="kn">import</span> <span class="n">ModelBase</span>
+<span class="kn">from</span> <span class="nn">simtools.orm.datatypes</span> <span class="kn">import</span> <span class="n">Unichar</span><span class="p">,</span> <span class="n">List</span>
+
+    <span class="k">class</span> <span class="nc">SampleModel</span><span class="p">(</span><span class="n">ModelBase</span><span class="p">):</span>
+        <span class="n">__tablename__</span> <span class="o">=</span> <span class="s">"sample_coll"</span>
+        <span class="n">__rid__</span> <span class="o">=</span> <span class="s">"SAMPL"</span>
+
+        <span class="n">data</span> <span class="o">=</span> <span class="n">Unichar</span><span class="p">(</span><span class="n">nullable</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+        <span class="n">data_list</span> <span class="o">=</span> <span class="n">List</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="p">[],</span> <span class="n">nullable</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+
+        <span class="nd">@classmethod</span>
+        <span class="k">def</span> <span class="nf">using</span><span class="p">(</span><span class="n">cls</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">pymongo</span><span class="o">.</span><span class="n">MongoClient</span><span class="p">()</span><span class="o">.</span><span class="n">sample_database</span>
+
+
+    <span class="n">sm</span> <span class="o">=</span> <span class="n">SampleModel</span><span class="o">.</span><span class="n">insert</span><span class="p">({</span><span class="s">"data"</span><span class="p">:</span> <span class="s">"hello"</span><span class="p">,</span> <span class="s">"data_list"</span><span class="p">:</span> <span class="p">[</span><span class="mi">1</span><span class="p">]})</span>
+
+    <span class="n">SampleModel</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s">"data"</span><span class="p">:</span> <span class="s">"hello"</span><span class="p">},</span> <span class="p">{</span><span class="s">"$set"</span><span class="p">:</span> <span class="p">{</span><span class="s">"data_list"</span><span class="p">:</span> <span class="mi">2</span><span class="p">}})</span>
+</pre></div>
+
+<p>This would duly raise an error which says that datatype does not match. How wonderful !!</p>
+      </section>
+
+    </div>
+    <!--[if !IE]><script>fixScale(document);</script><![endif]-->
+    
+  </body>
+</html>
