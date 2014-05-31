@@ -99,7 +99,7 @@ class ModelMeta(type):
         cls.searchable_fields = []
 
         if callable(OnModelInit):
-            OnModelInit(cls)
+            OnModelInit(cls, name, attrs)
 
         for model in base:
             if issubclass(model, ModelBase):
