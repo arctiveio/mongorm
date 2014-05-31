@@ -3,7 +3,7 @@ import pymongo
 import datetime
 
 from types import ClassType
-from datatypes import ObjectId, ID, DataType, List, Dict, Boolean, Unichar
+from .datatypes import ObjectId, ID, DataType, List, Dict, Boolean, Unichar
 
 OnModelInit = None
 
