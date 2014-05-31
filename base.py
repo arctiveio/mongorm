@@ -1,0 +1,580 @@
+import re
+import pymongo
+from types import ClassType
+
+
+from .datatypes import DataType, List, Dict, Boolean, Unichar
+from ..timezone import epoch_now, TZ
+from ..school import generate_oid_string, flatten, generate_resource_id
+
+class ORMException(Exception):
+    pass
+
+tables = {}
+RESOURCE_MAP = {}
+
+def get_model_from_id(ident):
+    ret = RESOURCE_MAP.get(str(ident)[-5:])
+    if not ret:
+        raise ORMException("No Model match for ObjectID: %s" % ident)
+    return tables.get(ret)
+
+def pack(_val):
+    if isinstance(_val, DbDictClass):
+        return _val
+    if isinstance(_val, dict):
+        return DbDictClass(_val)
+    elif hasattr(_val, '__iter__'):
+        return [pack(v) for v in _val]
+    return _val
+
+
+class DbDictClass(dict):
+    def __getattribute__(self, key):
+        try:
+            return self[key]
+        except KeyError:
+            pass
+        return super(DbDictClass, self).__getattribute__(key)
+
+    def __setattr__(self, key, value):
+        self[key] = pack(value)
+
+    def __delattr__(self, key):
+        self.pop(key)
+
+    def copy(self, dbdict=False):
+        if dbdict:
+            print "DbDict copy is expensive."
+
+        def _format(t, dbdict=False):
+            if isinstance(t, (DbDictClass, dict)):
+                _obj = {} if not dbdict else DbDictClass({})
+                for k, v in t.iteritems():
+                    _obj[k] = _format(v, dbdict=dbdict)
+                return _obj
+            elif isinstance(t, list):
+                return [_format(x, dbdict=dbdict) for x in t]
+            return t
+
+        return _format(self, dbdict=dbdict)
+
+
+class ModelMeta(type):
+    def get_field_defaults(cls, field):
+        return cls.defaults.get(field)
+
+    def get_field_choices(cls, field):
+        return cls.choices.get(field)
+
+    def attach_fields(cls, model):
+        for (field_name, obj) in vars(model).items():
+            if not isinstance(obj, DataType):
+                continue
+            cls.fields[field_name] = obj
+            if getattr(obj, 'default', None) is not None:
+                cls.defaults.update({field_name: obj.default})
+            if getattr(obj, 'choices', None) is not None:
+                cls.choices.update({field_name: obj.choices})
+            if obj.nullable is False:
+                cls.required_fields.add(field_name)
+            if obj.searchable is True:
+                cls.searchable_fields.append(field_name)
+
+        cls.searchable_fields = list(cls.searchable_fields)
+
+    def __init__(cls, name, base, attrs):
+        if attrs.get('__dyn__') or attrs.get('__baseclass__'):
+            return
+
+        tablename = getattr(cls, '__tablename__', name).lower()
+        cls.__tablename__ = tablename
+
+        cls.fields = {
+            '_id': Unichar(nullable=False),
+            'deleted': Boolean(default=False)
+        }
+
+        cls.defaults = {}
+        cls.choices = {}
+        cls.required_fields = set()
+        cls.searchable_fields = []
+
+        if not getattr(cls, '__rid__', None):
+            print "Generating missing __rid__ for [%s]" % name
+            attrs['__rid__'] = generate_resource_id(cls.__tablename__)
+
+        if '__rid__' in attrs:
+            resource_id = attrs.get('__rid__')
+            if len(resource_id) != 5:
+                raise Exception("ID %s len != 5 generated for table %s" %
+                                (resource_id, tablename))
+
+            if resource_id in RESOURCE_MAP and name != RESOURCE_MAP[resource_id]:
+                raise Exception("Conficting resources id for %s and %s " %
+                                (cls, RESOURCE_MAP[resource_id]))
+
+            cls.resource_id = resource_id
+            RESOURCE_MAP[resource_id] = name
+
+            if not tables.get(tablename):
+                tables[name] = cls
+
+        for model in base:
+            if issubclass(model, ModelBase):
+                if "__baseclass__" in model.__dict__:
+                    continue
+
+                cls.fields.update(model.fields)
+                cls.defaults.update(model.defaults)
+                cls.required_fields.update(model.required_fields)
+                cls.searchable_fields.extend(model.searchable_fields)
+
+            else:
+                cls.attach_fields(model)
+
+        cls.attach_fields(cls)
+
+class_name = lambda cls: cls.__name__ if isinstance(
+    cls, ClassType) else cls.__class__.__name__
+
+class ModelBase(DbDictClass):
+    __baseclass__ = True
+    __metaclass__ = ModelMeta
+
+    @classmethod
+    def valid_database(cls):
+        using = cls.using()
+        if not using:
+            raise ORMException(
+                '''
+                Error in model %s. Using is a required attribute.
+                ''' % cls.__name__)
+
+        if not isinstance(using, pymongo.database.Database):
+            raise ORMException(
+                '''
+                Error in model %s.
+                Using must be of type pymongo.database.Database
+                ''' % cls.__name__)
+
+        return using
+
+    @classmethod
+    def using(cls):
+        raise NotImplementedError
+
+    def validate(cls):
+        pass
+
+    def pre_save(cls):
+        pass
+
+    def post_save(cls):
+        pass
+
+    def __init__(self, partial_model=False, *args, **kwargs):
+        if args or not isinstance(partial_model, bool):
+            raise AttributeError("args not supported. Use kwargs instead.")
+
+        #NOTE: Delegating update to dict's update method.
+        self.__dict__['update'] = super(ModelBase, self).update
+        if partial_model:
+            super(ModelBase, self).__init__(kwargs)
+
+        else:
+            params = dict(self.defaults, **kwargs)
+            super(ModelBase, self).__init__(params)
+
+    def __getattribute__(self, key):
+        if (key not in ['fields', 'keys']) and \
+           (key in self.fields) and \
+           (key not in self.keys()):
+            raise AttributeError(
+                "%s object has no attribute %s" % (class_name(self), key))
+
+        return super(ModelBase, self).__getattribute__(key)
+
+    @classmethod
+    def mongo_collection(cls, database):
+        return getattr(database, cls.__tablename__)
+
+    @classmethod
+    def validate_type(cls, data_dict, check_required=True):
+        model_keys = []
+        errors = []
+
+        if check_required:
+            for field in cls.required_fields:
+                if field not in data_dict:
+                    if field in cls.defaults:
+                        data_dict[field] = cls.defaults[field]
+                    else:
+                        errors.append("%s is a required field" % field)
+
+        if not errors:
+            for key, value in data_dict.iteritems():
+                key_split = key.split('.')
+                check_key = key_split[0]
+                model_keys.append(check_key)
+                typeobj = cls.fields.get(check_key, None)
+
+                if not typeobj or not isinstance(typeobj, DataType):
+                    continue
+
+                if len(key_split) > 1:
+                    # dots can be used for settings value in array.
+                    # using index as key. i.e. {'$set': {myarray.0: 'val'}}
+                    # should be allowed
+                    if typeobj.datatype == dict or typeobj.datatype == list:
+                        continue
+                    errors.append("%s should be of type %s. "
+                                  % (key, typeobj.datatype))
+
+                try:
+                    data_dict[key] = typeobj.dbfy(value)
+                except Exception, e:
+                    error = getattr(e, "log_message", None) or \
+                            getattr(e, "error_message", None) or \
+                            "Expected %s. Found %s" % (typeobj.datatype, value)
+
+                    errors.append("Field: %s Error: %s" % (key, error))
+
+        if errors:
+            raise ORMException(errors)
+
+        return model_keys
+
+    @classmethod
+    def insert(cls, document):
+        if not document:
+            return [None, []][document == []]
+
+        documents = document if isinstance(document, list) else [document]
+        validated_docs = []
+
+        for d in documents:
+            d['_id'] = generate_oid_string(resource_id=cls.resource_id)
+            d['created_on'] = epoch_now()
+            d['modified_on'] = epoch_now()
+
+            cls.prepare_insert_document(d)
+
+            document = dict(cls.defaults, **d)
+            cls.validate_type(document)
+            validated_docs.append(document)
+
+        if not validated_docs:
+            return [None, []][validated_docs == []]
+
+        database = cls.valid_database()
+        call = cls.mongo_collection(database)
+        ids = call.insert(validated_docs)
+
+        cls.on_insert(ids)
+        return ids
+
+    @classmethod
+    def aggregate(cls, commands):
+        if not isinstance(commands, list):
+            raise ORMException(
+                "Aggregate accepts only a List of commands as arguments")
+
+        database = cls.valid_database()
+        call = cls.mongo_collection(database)
+        return call.aggregate(commands)
+
+    @classmethod
+    def group(cls, *args, **kwargs):
+        database = cls.valid_database()
+        call = cls.mongo_collection(database)
+        return call.group(*args, **kwargs)
+
+    def prepare_save_document(cls):
+        pass
+
+    @classmethod
+    def prepare_delete_document(cls, document):
+        pass
+
+    @classmethod
+    def prepare_update_document(cls, document):
+        pass
+
+    @classmethod
+    def prepare_insert_document(cls, document):
+        pass
+
+    @classmethod
+    def prepare_update_query(cls, filter_args):
+        pass
+
+    @classmethod
+    def prepare_get_query(cls, filter_args):
+        pass
+
+    @classmethod
+    def on_insert(cls, ids):
+        pass
+
+    @classmethod
+    def on_update(cls, filter_args, document, updated_fields=None):
+        pass
+
+    def save(self, validate=True):
+        if callable(self.pre_save):
+            self.pre_save()
+
+        database = self.valid_database()
+
+        self.modified_on = epoch_now()
+        existing_id = self.get('_id')
+
+        self.prepare_save_document()
+
+        if not existing_id or isinstance(existing_id, DataType):
+            self.created_on = epoch_now()
+            self._id = generate_oid_string(resource_id=self.resource_id)
+
+        if validate:
+            self.validate_type(self)
+
+        call = self.mongo_collection(database)
+
+        if existing_id:
+            self.on_update(
+                {'_id': existing_id},
+                document={'$set': self},
+                updated_fields=self.keys())
+        else:
+            self.on_insert(self._id)
+
+        try:
+            call.save(self)
+        except pymongo.errors.DuplicateKeyError, e:
+            pattern = re.compile(r'.+\s+(?P<db_name>\w+)\.(?P<table_name>\w+)\.\$(?P<field_name>\w+)_\d+.*\"(?P<value>.*)\".*}.*')
+            errors = pattern.findall(e.args[0])
+            if errors:
+                error_list = map(lambda i: "%s already exists for value %s" %
+                                 (i[2], i[3]), errors)
+
+                raise ORMException(error_list)
+
+            raise ORMException('%s' % e.args[0])
+
+        if callable(self.post_save):
+            self.post_save()
+
+        return self
+
+    @classmethod
+    def __update(cls, filter_args, document, silent=False, **kwargs):
+        errors = []
+        updated_fields = []
+        document = document or {}
+
+        if not document:
+            return False
+
+        database = cls.valid_database()
+        call = cls.mongo_collection(database)
+
+        if not cls.fields:
+            return call, filter_args, document, kwargs
+
+        for op, value in document.iteritems():
+            if op == '$set':
+                model_keys = cls.validate_type(value, check_required=False)
+                updated_fields.extend(model_keys)
+
+            elif op == '$unset':
+                for field in value:
+                    fields = field.split('.')
+                    if len(fields) == 1 and fields[0] in cls.required_fields:
+                        errors.append('%s is a required field' % fields[0])
+                    else:
+                        updated_fields.append(fields[0])
+
+            elif op in ['$pull', '$pullAll', '$push', '$pushAll', '$addToSet']:
+                errors = []
+                for field in value.keys():
+                    field_split = field.split('.')
+                    field = field_split[0]
+                    datatype = cls.fields.get(field)
+
+                    if not datatype or not isinstance(datatype, DataType):
+                        continue
+
+                    if (
+                        len(field_split) == 1 and \
+                        not isinstance(datatype, List)
+                    ) or (
+                        len(field_split) > 1 and \
+                        not isinstance(datatype, Dict)
+                    ):
+                        errors.append("%s should be of type %s. Found %s"
+                                      % (field, datatype.datatype, list))
+                    else:
+                        updated_fields.append(field)
+
+            elif isinstance(value, dict):
+                updated_fields.extend(value.keys())
+
+        if errors:
+            raise ORMException(errors)
+
+        if not document.get('$set'):
+            document["$set"] = {}
+
+        if silent is False:
+            document['$set']['modified_on'] = epoch_now()
+
+        document["$set"]["updated_on"] = epoch_now()
+
+        cls.prepare_update_document(document)
+        cls.prepare_update_query(filter_args)
+        cls.check_fields(filter_args)
+
+        cls.on_update(filter_args, document, updated_fields)
+
+        return call, filter_args, document, kwargs
+
+    @classmethod
+    def find_and_modify(cls, *args, **kwargs):
+        _sort = {}
+        sort = kwargs.pop('sort', None)
+        sortkey = kwargs.pop('sortkey', None)
+
+        if sort is None and sortkey is None:
+            pass
+        elif isinstance(sort, dict):
+            _sort = sort
+        elif isinstance(sortkey, dict):
+            _sort = sortkey
+        elif isinstance(sortkey, basestring):
+            _sort[sortkey] = sort or -1
+        else:
+            raise ORMException(
+                '''
+                Sort/SortKey must be provided as a {field: direction},
+                Alternatively use sortkey=field & sort=direction
+                ''')
+
+        call, _f, _d, _k = cls.__update(*args, **kwargs)
+        return call.find_and_modify(query=_f, update=_d, sort=_sort, **_k)
+
+    @classmethod
+    def update(cls, *args, **kwargs):
+        if kwargs.get("upsert"):
+            raise ORMException(
+                '''
+                Upsert is blocked.
+                Refer to https://github.com/Simversity/blackjack/issues/1051
+                ''')
+
+        call, _f, _d, _k = cls.__update(*args, **kwargs)
+        _k['safe'] = [True, kwargs.get('safe')]['safe' in kwargs]
+        _k['multi'] = [True, kwargs.get('multi')]['multi' in kwargs]
+
+        return call.update(_f, document=_d, **_k)
+
+    @classmethod
+    def _get(cls, filter_args=None, limit=None, skip=0, sort=-1,
+             sortkey='_id', max_scan=None, fields=None, **kwargs):
+
+        if isinstance(filter_args, basestring) and \
+           len(filter_args) == 24 and \
+           filter_args.isdigit():
+            filter_args = {"_id": filter_args}
+
+        if isinstance(fields, list):
+            fields.append('_id')
+        elif not isinstance(fields, dict):
+            fields = None
+
+        if isinstance(filter_args, dict):
+            filter_args = filter_args.copy()
+            filter_args.update(kwargs)
+        else:
+            filter_args = kwargs
+
+        if sort or sortkey:
+            if isinstance(sort, (list, tuple)):
+                sort = sort
+            elif isinstance(sortkey, (list, tuple)):
+                sort = sortkey
+            else:
+                sort = [(sortkey, sort)]
+
+        cls.check_fields(filter_args)
+
+        cls.prepare_get_query(filter_args)
+
+        coll = cls.mongo_collection(cls.valid_database())
+        return coll.find(filter_args, sort=sort, fields=fields,
+                         limit=limit or 0,
+                         skip=skip or 0, max_scan=max_scan,
+                         as_class=DbDictClass,
+                         manipulate=False)
+
+
+    @classmethod
+    def count(cls, *args, **kwargs):
+        kwargs["fields"] = ["_id"]
+        cursor = cls._get(*args, **kwargs)
+        return cursor.count()
+
+    @classmethod
+    def get_one(cls, *args, **kwargs):
+        kwargs['limit'] = 1
+        y = cls._get(*args, **kwargs)
+        return cls(partial_model=True, **y[0]) if y.count() else None
+
+    @classmethod
+    def get_many(cls, *args, **kwargs):
+        return cls._get(*args, **kwargs)
+
+    @classmethod
+    def check_fields(cls, filter_args):
+        for field in filter_args.iterkeys():
+            if not field.startswith('$'):
+                if "." in field:
+                    _field = field.split(".")[0]
+                else:
+                    _field = field
+
+                if _field not in cls.fields:
+                    raise ORMException(
+                        '''
+                        Invalid query on %s in %s
+                        ''' % (_field, cls.__tablename__))
+
+    @classmethod
+    def remove(cls, _id, *args, **kwargs):
+        database = cls.valid_database()
+        call = cls.mongo_collection(database)
+
+        if isinstance(_id, list):
+            filter_args = {'_id': {'$in': _id}}
+        elif isinstance(_id, dict):
+            filter_args = _id
+        else:
+            filter_args = {'_id': _id}
+
+        cls.check_fields(filter_args)
+
+        on_delete = getattr(cls, "on_delete", None)
+        if callable(on_delete):
+            documents = [x for x in call.find(filter_args)]
+            cls.on_delete(documents)
+
+        delete_doc = {
+            'deleted': True,
+            "deleted_on": epoch_now()
+        }
+
+        cls.prepare_delete_document(delete_doc)
+        call.update(filter_args, {'$set': delete_doc}, multi=True)
+
+    def delete(cls, *args, **kwargs):
+        return cls.remove(cls._id)
