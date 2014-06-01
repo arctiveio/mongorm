@@ -156,60 +156,6 @@ class Integer(DataType):
         return value
 
 
-class Dateday(Integer):
-    default = 1
-    valid = lambda self, x: x <= 31 and x >= 1
-
-    @check_defaults
-    def dbfy(cls, value):
-        value = Integer.dbfy(cls, value)
-        if not cls.valid(value):
-            raise DataTypeMismatch('%s is not a valid Date number [1-31]')
-        return value
-
-
-class Datemonth(Integer):
-    default = 1
-    valid = lambda self, x: x <= 12 and x >= 1
-
-    @check_defaults
-    def dbfy(cls, value):
-        value = Integer.dbfy(cls, value)
-        if not cls.valid(value):
-            raise DataTypeMismatch('%s is not a valid Month number. [1-12]')
-        return value
-
-
-class Dateyear(Integer):
-    default = 2010
-
-
-class Timehour(Integer):
-    default = 0
-    valid = lambda self, x: x < 24 and x >= 0
-
-    @check_defaults
-    def dbfy(cls, value):
-        value = Integer.dbfy(cls, value)
-        if not cls.valid(value):
-            raise DataTypeMismatch(
-                '%s is not a valid Hour format. [0-23 in 24 hours format]')
-        return value
-
-
-class Timeminutes(Integer):
-    default = 0
-    valid = lambda self, x: x < 60 and x >= 0
-
-    @check_defaults
-    def dbfy(cls, value):
-        value = Integer.dbfy(cls, value)
-        if not cls.valid(value):
-            raise DataTypeMismatch(
-                '%s is not a valid Minute number format. [0-59]')
-        return value
-
-
 class Decimal(DataType):
     datatype = float
     nullable = False
