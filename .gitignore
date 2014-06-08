@@ -1,0 +1,3 @@
+build/*
+dist/*
+mongorm.egg-info/*
