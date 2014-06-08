@@ -135,23 +135,25 @@ class ModelMeta(type):
         if cls == ModelDefinition or attrs.get('__dyn__'):
             return
 
+        if not issubclass(cls, ModelDefinition):
+            return
+
         cls.fields = {}
         cls.defaults = {}
         cls.choices = {}
         cls.required_fields = set()
         cls.searchable_fields = []
 
-        if not attrs.get('__baseclass__') and \
-           issubclass(cls, ModelDefinition):
-
+        if not attrs.get('__baseclass__') and attrs.get("__tablename__"):
             if callable(OnModelInit):
                 OnModelInit(cls, name, attrs)
 
-            tablename = (attrs.get("__tablename__") or cls.__name__).lower()
-            cls.__tablename__ = tablename
+            cls.__tablename__ = attrs["__tablename__"]
 
-        else:
-            cls.__tablename__ = None
+        elif not attrs.get("__baseclass__"):
+            print ("Skipping Model %s."
+                   " Does not expose __tablename__."
+                   " This is an error or an inherited model." % name)
 
         for model in base:
             if model == ModelDefinition:
