@@ -222,11 +222,15 @@ class ModelBase(ModelDefinition):
         call = self.mongo_collection(database)
 
         if existing_id:
-            self.on_update(
-                {'_id': existing_id},
-                document={'$set': self},
-                updated_fields=self.keys())
+            document = {'$set': self}
+            filter_args = {"_id": existing_id}
+
+            self.prepare_update_document(document)
+            self.prepare_update_query(filter_args)
+
+            self.on_update(filter_args, document, updated_fields=self.keys())
         else:
+            self.prepare_insert_document(self)
             self.on_insert(self._id)
 
         try:
