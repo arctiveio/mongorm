@@ -14,5 +14,6 @@ setup(
     author_email="dev@simversity.com",
     url="http://simversity.github.io/mongorm",
     license="http://www.apache.org/licenses/LICENSE-2.0",
-    description='''Python based ORM for MongoDB'''
+    description='''Python based ORM for MongoDB''',
+    zip_safe=False
 )
