@@ -120,7 +120,7 @@ class ModelMeta(type):
                 continue
 
             cls.fields[field_name] = obj
-            if getattr(obj, 'default', None) is not None:
+            if hasattr(obj, 'default'):
                 cls.defaults.update({field_name: obj.default})
             if getattr(obj, 'choices', None) is not None:
                 cls.choices.update({field_name: obj.choices})
