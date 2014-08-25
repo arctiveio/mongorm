@@ -134,7 +134,7 @@ class ModelBase(ModelDefinition):
         validated_docs = []
 
         for d in documents:
-            d['_id'] = cls.generate_id()
+            d['_id'] = d.get("_id") or cls.generate_id()
             d['created_on'] = cls.now()
             d['modified_on'] = cls.now()
 
