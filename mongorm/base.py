@@ -399,7 +399,8 @@ class ModelBase(ModelDefinition):
             filter_args = {"_id": filter_args}
 
         if isinstance(fields, list):
-            fields.append('_id')
+            if "_id" not in fields:
+                fields.append('_id')
         elif not isinstance(fields, dict):
             fields = None
 

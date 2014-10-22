@@ -4,7 +4,7 @@ import sys
 import os
 from setuptools import setup, Extension
 
-version = "0.1.3"
+version = "0.1.4"
 
 setup(
     name="mongorm",
