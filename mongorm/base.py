@@ -209,12 +209,15 @@ class ModelBase(ModelDefinition):
 
         self.modified_on = self.now()
         existing_id = self.get('_id')
+        existing_created_on = self.get("created_on")
 
         self.prepare_save_document()
 
         if not existing_id or isinstance(existing_id, DataType):
-            self.created_on = self.now()
             self._id = self.generate_id()
+
+        if not existing_created_on:
+            self.created_on = self.now()
 
         if validate:
             self.validate_type(self)
